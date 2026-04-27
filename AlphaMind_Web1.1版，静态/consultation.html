@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>AlphaMind 多轮对话咨询</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{
+      --brand:#8B0012;
+      --accent:#FFA726;
+      --bg:#FFF8F2;
+      --text:#2C1A12;
+      --border:#E7D9CD;
+      --muted:rgba(44,26,18,.72);
+      --shadow:0 10px 30px rgba(0,0,0,.06);
+      --radius:18px;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:"Microsoft YaHei",-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+      background:radial-gradient(1200px 600px at 20% -10%, rgba(255,167,38,.18), transparent 60%),
+                 radial-gradient(900px 500px at 90% 0%, rgba(139,0,18,.12), transparent 55%),
+                 var(--bg);
+      color:var(--text);
+    }
+    .page{max-width:1080px;margin:0 auto;padding:26px 16px 44px}
+    .topbar{display:flex;align-items:center;gap:14px;padding:14px;border:1px solid var(--border);border-radius:var(--radius);background:rgba(255,255,255,.7);box-shadow:var(--shadow);backdrop-filter:blur(10px);}
+    .logo{width:52px;height:52px}
+    .brand{flex:1;min-width:0}
+    .brand h1{margin:0;font-size:20px;color:var(--brand)}
+    .brand p{margin:4px 0 0;font-size:12px;color:var(--muted)}
+    .pill{font-size:11px;font-weight:950;padding:6px 10px;border-radius:999px;background:rgba(255,167,38,.20);border:1px solid rgba(255,167,38,.35)}
+    
+    .main-grid{display:grid;grid-template-columns:1fr 280px;gap:16px;margin-top:16px}
+    @media(max-width:920px){.main-grid{grid-template-columns:1fr}}
+    
+    .card{background:rgba(255,255,255,.88);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;}
+    .card h2{margin:0 0 12px;font-size:14px;color:var(--brand)}
+    
+    /* 对话框样式 */
+    #chatContainer{
+      height:500px;
+      overflow-y:auto;
+      border:1px solid var(--border);
+      border-radius:14px;
+      background:#fafaf7;
+      padding:12px;
+      margin-bottom:12px;
+    }
+    
+    .message{
+      display:flex;
+      gap:10px;
+      margin-bottom:12px;
+      animation:fadeIn .3s ease-in;
+    }
+    
+    @keyframes fadeIn{
+      from{opacity:0;transform:translateY(8px)}
+      to{opacity:1;transform:translateY(0)}
+    }
+    
+    .message.user{justify-content:flex-end}
+    .message.assistant{justify-content:flex-start}
+    
+    .message-content{
+      max-width:420px;
+      padding:10px 12px;
+      border-radius:12px;
+      word-wrap:break-word;
+      line-height:1.5;
+    }
+    
+    .message.user .message-content{
+      background:var(--brand);
+      color:#fff;
+    }
+    
+    .message.assistant .message-content{
+      background:rgba(139,0,18,.06);
+      border:1px solid rgba(139,0,18,.12);
+      color:var(--text);
+    }
+    
+    .message-time{
+      font-size:10px;
+      color:var(--muted);
+      margin-top:4px;
+    }
+    
+    /* 输入框样式 */
+    .input-group{
+      display:flex;
+      gap:8px;
+      align-items:flex-end;
+    }
+    
+    textarea{
+      flex:1;
+      padding:10px 12px;
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:#fff;
+      font-family:inherit;
+      font-size:13px;
+      resize:none;
+      min-height:40px;
+      max-height:100px;
+      outline:none;
+      transition:border-color .15s,box-shadow .15s;
+    }
+    
+    textarea:focus{
+      border-color:rgba(255,167,38,.85);
+      box-shadow:0 0 0 3px rgba(255,167,38,.22);
+    }
+    
+    .btn{
+      border:none;
+      border-radius:999px;
+      padding:10px 16px;
+      cursor:pointer;
+      font-weight:950;
+      font-size:13px;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      transition:transform .05s,background .15s;
+      user-select:none;
+    }
+    
+    .btn:active{transform:translateY(1px)}
+    .btn-primary{background:var(--brand);color:#fff}
+    .btn-primary:hover{background:var(--accent);color:#23140e}
+    .btn-primary:disabled{background:#ccc;cursor:not-allowed;transform:none}
+    .btn-secondary{background:rgba(255,167,38,.15);color:var(--brand);border:1px solid rgba(255,167,38,.35)}
+    .btn-ghost{background:transparent;border:1px dashed var(--border);color:var(--text)}
+    
+    .spinner{width:12px;height:12px;border-radius:50%;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;display:none;animation:spin 1s linear infinite;}
+    .btn.loading .spinner{display:inline-block}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    
+    /* 侧边栏 */
+    .sidebar{
+      display:flex;
+      flex-direction:column;
+      gap:16px;
+    }
+    
+    .sidebar .card{padding:14px}
+    .sidebar .card h3{margin:0 0 8px;font-size:12px;color:var(--brand);font-weight:950}
+    .sidebar .card p{margin:6px 0;font-size:12px;line-height:1.5;color:var(--text)}
+    .sidebar .card .hint{color:var(--muted);font-size:11px}
+    
+    .status-box{
+      padding:10px 12px;
+      border-radius:14px;
+      font-size:12px;
+      background:rgba(255,248,242,.8);
+      border:1px solid rgba(139,0,18,.12);
+    }
+    
+    .status-item{
+      display:flex;
+      justify-content:space-between;
+      gap:8px;
+      padding:4px 0;
+    }
+    
+    .status-label{color:var(--muted)}
+    .status-value{font-weight:950;color:var(--brand)}
+    
+    .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+    
+    .empty-state{
+      padding:40px 20px;
+      text-align:center;
+      color:var(--muted);
+    }
+    
+    .loading-indicator{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:12px;
+      background:rgba(255,167,38,.15);
+      border:1px solid rgba(255,167,38,.35);
+      border-radius:12px;
+      color:var(--brand);
+      font-size:12px;
+      margin-bottom:8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <img class="logo" src="alphamind_logo.png" alt="AlphaMind Logo" />
+      <div class="brand">
+        <h1>AlphaMind 多轮对话咨询</h1>
+        <p>与AI投顾进行自然对话，获取个性化投资建议</p>
+      </div>
+      <span class="pill">💬 对话版</span>
+    </header>
+
+    <main class="main-grid">
+      <section class="card">
+        <h2>💬 与投顾对话</h2>
+        
+        <div id="chatContainer" style="display:none;">
+          <!-- 对话消息显示在这里 -->
+        </div>
+        
+        <div id="emptyState" class="empty-state">
+          <p>输入用户ID开始咨询...</p>
+        </div>
+        
+        <div id="loadingIndicator" class="loading-indicator" style="display:none;">
+          <div class="spinner" style="display:inline-block;"></div>
+          <span>投顾思考中...</span>
+        </div>
+        
+        <div class="input-group">
+          <textarea 
+            id="messageInput" 
+            placeholder="输入你的问题或信息..." 
+            disabled
+            rows="2"
+          ></textarea>
+          <button id="sendBtn" class="btn btn-primary" disabled onclick="sendMessage()">
+            <span style="font-size:16px">→</span>
+          </button>
+        </div>
+        
+        <div class="actions">
+          <button class="btn btn-secondary" onclick="startConsultation()">新建咨询</button>
+          <button class="btn btn-ghost" id="finalizeBtn" onclick="finalizConsultation()" disabled>完成咨询</button>
+          <button class="btn btn-ghost" onclick="resetPage()">返回</button>
+        </div>
+      </section>
+
+      <aside class="sidebar">
+        <div class="card">
+          <h3>📊 咨询状态</h3>
+          <div class="status-box">
+            <div class="status-item">
+              <span class="status-label">用户ID</span>
+              <span class="status-value" id="userIdDisplay">-</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">会话ID</span>
+              <span class="status-value" id="sessionIdDisplay" style="font-size:10px;word-break:break-all;">-</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">消息数</span>
+              <span class="status-value" id="messageCountDisplay">0</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">状态</span>
+              <span class="status-value" id="statusDisplay">就绪</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>💡 提示</h3>
+          <p class="hint">
+            • 与投顾进行自然对话<br/>
+            • 逐步告诉他你的情况<br/>
+            • 最多15轮对话后点"完成"<br/>
+            • 获取个性化建议
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>⚠️ 免责声明</h3>
+          <p class="hint">
+            本建议仅供参考，不构成投资建议。投资有风险，入市需谨慎。
+          </p>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- 模态框：输入用户ID -->
+  <div id="userModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:999;">
+    <div style="background:#fff;border-radius:18px;padding:30px;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,.15);">
+      <h2 style="margin:0 0 12px;font-size:16px;color:#8B0012;">开始咨询</h2>
+      <p style="margin:0 0 20px;font-size:13px;color:rgba(44,26,18,.72);">请输入您的用户ID（可选，用于数据关联）</p>
+      <input 
+        id="userIdInput" 
+        type="text" 
+        placeholder="例如：user_001" 
+        style="width:100%;padding:10px 12px;border:1px solid #E7D9CD;border-radius:12px;margin-bottom:14px;font-size:13px;outline:none;"
+      />
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button onclick="closeUserModal()" style="border:1px dashed #E7D9CD;background:transparent;color:#2C1A12;border-radius:999px;padding:10px 16px;cursor:pointer;font-weight:950;font-size:13px;">取消</button>
+        <button onclick="confirmUserId()" style="background:#8B0012;color:#fff;border:none;border-radius:999px;padding:10px 16px;cursor:pointer;font-weight:950;font-size:13px;">开始</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = 'http://localhost:5000/api';
+    let currentSessionId = null;
+    let currentUserId = null;
+    let messageCount = 0;
+    let isInitializing = false;
+
+    function showUserModal(){
+      document.getElementById('userModal').style.display = 'flex';
+      document.getElementById('userIdInput').focus();
+    }
+
+    function closeUserModal(){
+      document.getElementById('userModal').style.display = 'none';
+    }
+
+    async function confirmUserId(){
+      const userId = document.getElementById('userIdInput').value || `web_user_${Date.now()}`;
+      document.getElementById('userModal').style.display = 'none';
+      await initializeSession(userId);
+    }
+
+    async function startConsultation(){
+      showUserModal();
+    }
+
+    async function initializeSession(userId){
+      try {
+        isInitializing = true;
+        updateStatus('初始化中...');
+        
+        const response = await fetch(`${API_BASE}/session/create`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({user_id: userId})
+        });
+
+        if (!response.ok) throw new Error('创建会话失败');
+
+        const data = await response.json();
+        currentSessionId = data.session_id;
+        currentUserId = userId;
+        messageCount = 1;
+
+        document.getElementById('emptyState').style.display = 'none';
+        document.getElementById('chatContainer').style.display = 'block';
+        document.getElementById('messageInput').disabled = false;
+        document.getElementById('sendBtn').disabled = false;
+        document.getElementById('finalizeBtn').disabled = false;
+
+        document.getElementById('userIdDisplay').textContent = userId;
+        document.getElementById('sessionIdDisplay').textContent = data.session_id.substring(0, 12) + '...';
+        document.getElementById('messageCountDisplay').textContent = '1';
+        updateStatus('就绪');
+
+        // 显示投顾初始问候
+        addMessage('assistant', data.initial_message);
+        document.getElementById('messageInput').focus();
+
+      } catch (error) {
+        alert('错误：' + error.message);
+        updateStatus('错误');
+        isInitializing = false;
+      }
+    }
+
+    async function sendMessage(){
+      if (!currentSessionId || isInitializing) return;
+
+      const input = document.getElementById('messageInput');
+      const message = input.value.trim();
+      
+      if (!message) return;
+
+      try {
+        isInitializing = true;
+        input.disabled = true;
+        document.getElementById('sendBtn').disabled = true;
+        showLoadingIndicator();
+        updateStatus('分析中...');
+
+        // 添加用户消息
+        addMessage('user', message);
+        input.value = '';
+
+        // 发送到后端
+        const response = await fetch(`${API_BASE}/session/${currentSessionId}/message`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            message: message,
+            user_id: currentUserId
+          })
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || '发送失败');
+        }
+
+        const data = await response.json();
+        
+        // 添加投顾回复
+        addMessage('assistant', data.reply);
+        messageCount = data.message_count;
+        document.getElementById('messageCountDisplay').textContent = messageCount;
+
+        // 提醒用户接近消息限制
+        if (messageCount >= 14) {
+          alert('⚠️ 已经进行了 ' + messageCount + ' 轮对话，建议点击"完成咨询"生成最终建议。');
+        }
+
+        updateStatus('就绪');
+
+      } catch (error) {
+        alert('错误：' + error.message);
+        updateStatus('错误');
+      } finally {
+        hideLoadingIndicator();
+        input.disabled = false;
+        document.getElementById('sendBtn').disabled = false;
+        isInitializing = false;
+        input.focus();
+      }
+    }
+
+    async function finalizConsultation(){
+      if (!currentSessionId) return;
+
+      if (!confirm('确定要完成咨询并生成最终建议吗？')) return;
+
+      try {
+        isInitializing = true;
+        updateStatus('生成建议中...');
+        showLoadingIndicator();
+        document.getElementById('messageInput').disabled = true;
+        document.getElementById('sendBtn').disabled = true;
+
+        const response = await fetch(`${API_BASE}/session/${currentSessionId}/finalize`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({user_id: currentUserId})
+        });
+
+        if (!response.ok) throw new Error('生成建议失败');
+
+        const data = await response.json();
+
+        // 显示最终建议
+        addMessage('assistant', data.final_advice);
+        updateStatus('已完成');
+
+        // 显示导出选项
+        setTimeout(() => {
+          document.getElementById('sendBtn').disabled = true;
+          document.getElementById('messageInput').disabled = true;
+          document.getElementById('finalizeBtn').disabled = true;
+          
+          const exportBtn = document.createElement('button');
+          exportBtn.className = 'btn btn-secondary';
+          exportBtn.textContent = '📥 导出建议';
+          exportBtn.onclick = () => exportAdvice(data.final_advice);
+          document.querySelector('.actions').appendChild(exportBtn);
+        }, 500);
+
+      } catch (error) {
+        alert('错误：' + error.message);
+        updateStatus('错误');
+      } finally {
+        hideLoadingIndicator();
+        isInitializing = false;
+      }
+    }
+
+    function addMessage(role, content){
+      const container = document.getElementById('chatContainer');
+      const msgDiv = document.createElement('div');
+      msgDiv.className = `message ${role}`;
+      msgDiv.innerHTML = `
+        <div>
+          <div class="message-content">${escapeHtml(content)}</div>
+          <div class="message-time">${new Date().toLocaleTimeString('zh-CN')}</div>
+        </div>
+      `;
+      container.appendChild(msgDiv);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function updateStatus(text){
+      document.getElementById('statusDisplay').textContent = text;
+    }
+
+    function showLoadingIndicator(){
+      document.getElementById('loadingIndicator').style.display = 'flex';
+    }
+
+    function hideLoadingIndicator(){
+      document.getElementById('loadingIndicator').style.display = 'none';
+    }
+
+    function resetPage(){
+      location.reload();
+    }
+
+    function exportAdvice(advice){
+      const text = advice;
+      const blob = new Blob([text], {type: 'text/plain;charset=utf-8'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `投资建议-${new Date().toISOString().split('T')[0]}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function escapeHtml(text){
+      const map = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'};
+      return text.replace(/[&<>"']/g, m => map[m]);
+    }
+
+    // 页面加载完成后允许输入
+    document.getElementById('userIdInput').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') confirmUserId();
+    });
+
+    document.getElementById('messageInput').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !isInitializing) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+  </script>
+</body>
+</html>
