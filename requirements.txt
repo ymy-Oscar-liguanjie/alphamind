@@ -1,0 +1,11 @@
+numpy>=1.23
+pandas>=1.5
+scikit-learn>=1.2
+matplotlib>=3.6
+seaborn>=0.12
+joblib>=1.2
+requests
+scikit-learn
+flask>=2.3.0
+flask-cors>=4.0.0
+python-dotenv>=0.19.0
