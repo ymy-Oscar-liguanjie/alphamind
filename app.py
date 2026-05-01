@@ -1,15 +1,15 @@
+import os
+import pandas as pd
+import numpy as np
 from llm_client import ask_llm, ask_llm_with_history
-from model import predict_risk
-from portfolio import generate_portfolio
-from storage import (
-    save_chat,
-    get_user_history,
-    get_latest_record,
-    get_all_users_with_counts,
-    delete_user_records,
-    create_session,
-    add_message,
-)
+
+
+
+from model import predict_risk, load_model
+from portfolio import generate_portfolio, load_portfolio_recommendations
+from storage import (save_chat, get_user_history, get_latest_record, get_all_users, 
+                     delete_user_records, create_session, add_message, get_session_messages,
+                     update_session_risk, get_session_detail, get_user_sessions, delete_session)
 
 def interactive_consultation():
     """多轮对话投资咨询模式（新）"""
@@ -97,35 +97,66 @@ def run_demo():
     print("\n[处理中...]\n")
 
     try:
-        # LLM解析（简化）
-        print("第1步: 解析用户信息...")
-        llm_response = ask_llm(f"提取用户信息：{user_input}")
+        # 第1步：从 M2 数据加载用户特征
+        print("第1步: 加载用户特征...")
+        all_features_path = "work/all_features.csv"
+        if os.path.exists(all_features_path):
+            all_features = pd.read_csv(all_features_path)
+            user_data = all_features[all_features["user_id"] == int(user_id)]
+            
+            if len(user_data) == 0:
+                print(f"⚠️  用户 {user_id} 在特征数据中不存在，使用示例特征")
+                features_dict = {"age": 35, "income10k": 5, "asset10k": 20, "exp_years": 3, "children": 1}
+            else:
+                # 将用户数据转换为字典（包含所有特征）
+                features_dict = user_data.iloc[0].to_dict()
+                print(f"✅ 已加载用户 {user_id} 的特征信息")
+        else:
+            print(f"⚠️  特征文件不存在，使用示例特征")
+            features_dict = {"age": 35, "income10k": 5, "asset10k": 20, "exp_years": 3, "children": 1}
         
-        # 检查是否出错
-        if "错误" in llm_response or "失败" in llm_response:
-            print(f"❌ 解析失败: {llm_response}")
-            return
-
-        # 假设解析后（简化）
-        features = [30, 2, 50, 5, 1]
-
-        print("第2步: 计算风险等级...")
-        risk = predict_risk(features)
+        # 第2步：使用 M3 模型预测风险
+        print("\n第2步: 使用 M3 模型预测风险等级...")
+        try:
+            risk_prob = predict_risk(features_dict, workdir="work")
+            print(f"✅ 风险概率: {risk_prob:.2%}")
+        except Exception as e:
+            print(f"⚠️  M3 预测失败: {e}，使用规则推断")
+            risk_prob = 0.5
         
-        print("第3步: 生成资产配置...")
-        portfolio = generate_portfolio(risk)
+        # 第3步：使用 M4 资产配置推荐
+        print("\n第3步: 使用 M4 生成资产配置...")
+        try:
+            portfolio = generate_portfolio(user_id=int(user_id), risk_prob=risk_prob, workdir="work")
+            print(f"✅ 资产配置已生成: {portfolio}")
+        except Exception as e:
+            print(f"⚠️  M4 推荐失败: {e}，使用规则推断")
+            portfolio = generate_portfolio(user_id=None, risk_prob=risk_prob, workdir="work")
+        
+        # 第4步：LLM 增强建议生成
+        print("\n第4步: 使用 LLM 生成投顾建议...")
+        portfolio_str = ", ".join([f"{k}: {v:.1f}%" for k, v in portfolio.items()])
+        final_prompt = f"""基于用户情况和数据分析结果，生成投资建议：
 
-        print("第4步: 生成投资建议...")
-        final_prompt = f"风险等级:{risk}，资产配置:{portfolio}，请生成投资建议"
+用户输入: {user_input}
+风险概率: {risk_prob:.2%}
+资产配置建议: {portfolio_str}
+
+请生成详细的个性化投资建议，包括：
+1. 风险评估
+2. 资产配置解释
+3. 具体投资方向
+4. 风险提示"""
+        
         answer = ask_llm(final_prompt)
-
+        
         # 检查是否出错
         if "错误" in answer or "失败" in answer:
             print(f"❌ 建议生成失败: {answer}")
             return
 
         # 保存会话
-        save_chat(user_id, user_input, answer, risk, str(portfolio))
+        save_chat(user_id, user_input, answer, f"{risk_prob:.2%}", portfolio_str)
 
         print("\n===== 投顾建议 =====")
         print(answer)
@@ -133,6 +164,8 @@ def run_demo():
 
     except Exception as e:
         print(f"❌ 程序出错: {e}")
+        import traceback
+        traceback.print_exc()
         return
 
 def view_history():
