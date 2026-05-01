@@ -13,11 +13,13 @@ import os
 import pandas as pd
 import numpy as np
 
+
 from llm_client import ask_llm_with_history, ask_llm
 from model import predict_risk, load_model
 from portfolio import generate_portfolio, load_portfolio_recommendations
 from storage import (create_session, add_message, get_session_messages,
                      get_user_sessions, delete_session)
+
 
 app = Flask(__name__)
 CORS(app)
@@ -461,14 +463,79 @@ def health_check():
 
 @app.route('/')
 def serve_assessment():
-    """提供assessment.html"""
-    return send_from_directory('./AlphaMind_Web1.1版，静态', 'assessment.html')
+    """提供主控台页面"""
+    return send_from_directory('./AlphaMind_Web1.1版，静态', 'app_console.html')
 
 
 @app.route('/<filename>')
 def serve_static(filename):
     """提供其他静态文件"""
     return send_from_directory('./AlphaMind_Web1.1版，静态', filename)
+
+
+@app.route('/api/advice/quick', methods=['POST'])
+def quick_advice():
+    """快速生成建议（对应 app.py 的 run_demo）"""
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'web_user')
+    user_input = data.get('user_input', '')
+    if not user_input:
+        return jsonify({'success': False, 'error': 'user_input 不能为空'}), 400
+
+    llm_response = ask_llm(f"提取用户信息：{user_input}")
+    if "错误" in llm_response or "失败" in llm_response:
+        return jsonify({'success': False, 'error': llm_response}), 500
+
+    features = [30, 2, 50, 5, 1]
+    risk = predict_risk(features)
+    portfolio = generate_portfolio(risk)
+    final_prompt = f"风险等级:{risk}，资产配置:{portfolio}，请生成投资建议"
+    answer = ask_llm(final_prompt)
+
+    if "错误" in answer or "失败" in answer:
+        return jsonify({'success': False, 'error': answer}), 500
+
+    save_chat(user_id, user_input, answer, risk, str(portfolio))
+    return jsonify({'success': True, 'risk': risk, 'portfolio': portfolio, 'advice': answer})
+
+
+@app.route('/api/history/latest/<user_id>', methods=['GET'])
+def api_latest_history(user_id):
+    latest = get_latest_record(user_id)
+    if not latest:
+        return jsonify({'success': False, 'error': '无记录'}), 404
+    question, answer, risk, portfolio, time = latest
+    return jsonify({
+        'success': True,
+        'record': {'question': question, 'answer': answer, 'risk': risk, 'portfolio': portfolio, 'time': time}
+    })
+
+
+@app.route('/api/history/all/<user_id>', methods=['GET'])
+def api_all_history(user_id):
+    rows = get_user_history(user_id)
+    return jsonify({
+        'success': True,
+        'records': [
+            {'question': q, 'risk': r, 'portfolio': p, 'time': t}
+            for q, r, p, t in rows
+        ]
+    })
+
+
+@app.route('/api/users', methods=['GET'])
+def api_users():
+    users = get_all_users_with_counts()
+    return jsonify({
+        'success': True,
+        'users': [{'user_id': u, 'count': c} for u, c in users]
+    })
+
+
+@app.route('/api/history/<user_id>', methods=['DELETE'])
+def api_delete_history(user_id):
+    delete_user_records(user_id)
+    return jsonify({'success': True, 'message': f'已删除 {user_id} 的记录'})
 
 
 if __name__ == '__main__':

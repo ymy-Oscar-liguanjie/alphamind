@@ -2,6 +2,8 @@ import os
 import pandas as pd
 import numpy as np
 from llm_client import ask_llm, ask_llm_with_history
+
+
 from model import predict_risk, load_model
 from portfolio import generate_portfolio, load_portfolio_recommendations
 from storage import (save_chat, get_user_history, get_latest_record, get_all_users, 
@@ -210,15 +212,13 @@ def view_all_users():
     """查看所有用户"""
     print("\n===== 所有用户 =====\n")
     
-    users = get_all_users()
+    users = get_all_users_with_counts()
     
     if not users:
         print("❌ 没有用户记录\n")
         return
     
-    for user_id in users:
-        from storage import get_record_count
-        count = get_record_count(user_id)
+    for user_id, count in users:
         print(f"👤 {user_id}: {count} 条记录")
     print()
 
