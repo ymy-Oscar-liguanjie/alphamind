@@ -1,3 +1,4 @@
+
 """
 AlphaMind Flask后端服务
 将多轮对话咨询程序通过API暴露给Web前端
