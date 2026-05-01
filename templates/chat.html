@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>AlphaMind</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app-shell">
+    <div class="sidebar">
+        <div class="brand">
+            <img src="/static/alphamind_logo.png" alt="AlphaMind">
+            <div>
+                <div class="brand-name">AlphaMind</div>
+                <div class="brand-desc">Intelligent Advisor</div>
+            </div>
+        </div>
+
+        <div class="sidebar-actions">
+            <button class="side-btn new-btn" onclick="createChat()">+ 新对话</button>
+            <button class="side-btn analysis-btn" onclick="showAnalysis()">查看 M3/M4 分析</button>
+        </div>
+
+        <div id="chatList" class="chat-list"></div>
+    </div>
+
+    <div class="main">
+        <div class="header">
+            <div class="header-title">
+                <strong>智能投顾系统</strong>
+                <span>alphamind · 梭哈是一种智慧</span>
+            </div>
+            <button class="logout" onclick="logout()">退出</button>
+        </div>
+
+        <div id="chatBox" class="chat-box">
+            <div id="dropOverlay" class="drop-overlay">释放图片以上传识别</div>
+            <div class="msg ai">
+                <b>AI：</b>
+                <div class="markdown">你好，我是 AlphaMind 智能投顾。现在支持文字、图片识别、拖拽上传、浏览器语音识别。</div>
+            </div>
+        </div>
+
+        <div class="bottom">
+            <input type="file" id="imageInput" accept="image/*" style="display:none" onchange="handleImageFile(this.files[0])">
+            <button class="tool-btn" onclick="document.getElementById('imageInput').click()">图片识别</button>
+            <button id="recordBtn" class="tool-btn" onclick="toggleRecording()">🎙 开始语音</button>
+            <span id="recordStatus" class="status"></span>
+            <textarea id="msg" placeholder="请输入问题，或拖拽图片到聊天窗口..."></textarea>
+            <button class="send" onclick="sendMsg()">发送</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentChatId = null
+
+// 浏览器原生语音识别
+let recognition = null
+let isRecording = false
+
+function escapeHtml(str) {
+    return String(str ?? "").replace(/[&<>"']/g, function(s) {
+        return ({
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;"
+        })[s]
+    })
+}
+
+function renderMarkdown(text) {
+    text = String(text ?? "")
+
+    let codeBlocks = []
+
+    text = text.replace(/```(\w*)\n([\s\S]*?)```/g, function(m, lang, code) {
+        const id = codeBlocks.length
+        codeBlocks.push({
+            lang: lang || "text",
+            code: code
+        })
+        return `@@CODEBLOCK_${id}@@`
+    })
+
+    let html = escapeHtml(text)
+
+    html = html
+        .replace(/^### (.*)$/gm, "<h3>$1</h3>")
+        .replace(/^## (.*)$/gm, "<h2>$1</h2>")
+        .replace(/^# (.*)$/gm, "<h1>$1</h1>")
+        .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+        .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
+        .replace(/^\- (.*)$/gm, "<li>$1</li>")
+        .replace(/(<li>[\s\S]*?<\/li>)/g, "<ul>$1</ul>")
+        .replace(/\n/g, "<br>")
+
+    codeBlocks.forEach(function(b, i) {
+        const code = escapeHtml(b.code)
+        const block = `
+            <div class="code-block">
+                <div class="code-head">
+                    <span>${escapeHtml(b.lang)}</span>
+                    <button class="copy-btn" onclick="copyCode(this)">复制</button>
+                </div>
+                <pre><code>${code}</code></pre>
+            </div>
+        `
+        html = html.replace(`@@CODEBLOCK_${i}@@`, block)
+    })
+
+    return `<div class="markdown">${html}</div>`
+}
+
+function copyCode(btn) {
+    const code = btn.closest(".code-block").querySelector("code").innerText
+    navigator.clipboard.writeText(code)
+    btn.innerText = "已复制"
+    setTimeout(function() {
+        btn.innerText = "复制"
+    }, 1200)
+}
+
+function renderContent(content) {
+    const imageMd = String(content).match(/^\[图片\]\((.*?)\)\n?([\s\S]*)/)
+
+    if (imageMd) {
+        const url = imageMd[1]
+        let text = imageMd[2] || ""
+        text = text.replace(/\[图片识别内容\][\s\S]*/, "")
+
+        return `
+            ${renderMarkdown(text)}
+            <img class="chat-image" src="${url}">
+        `
+    }
+
+    return renderMarkdown(content)
+}
+
+function addMessage(role, content, id = null) {
+    const div = document.createElement("div")
+    div.className = `msg ${role === "user" ? "user" : "ai"}`
+
+    if (id) {
+        div.id = id
+    }
+
+    div.innerHTML = `
+        <b>${role === "user" ? "你" : "alphamind小助手"}：</b>
+        ${renderContent(content)}
+    `
+
+    document.getElementById("chatBox").appendChild(div)
+    scrollBottom()
+
+    return div
+}
+
+function addThinking(id) {
+    const div = document.createElement("div")
+    div.className = "msg ai"
+    div.id = id
+
+    div.innerHTML = `
+        <b>AI：</b>
+        <div class="thinking">
+            正在思考
+            <span class="dots">
+                <span></span><span></span><span></span>
+            </span>
+        </div>
+    `
+
+    document.getElementById("chatBox").appendChild(div)
+    scrollBottom()
+}
+
+function typeWriter(el, html, speed = 8) {
+    const temp = document.createElement("div")
+    temp.innerHTML = html
+
+    const text = temp.innerText
+
+    el.innerHTML = "<b>AI：</b><div class='markdown'></div>"
+
+    const target = el.querySelector(".markdown")
+
+    let i = 0
+
+    const timer = setInterval(function() {
+        i += 2
+        target.innerText = text.slice(0, i)
+        scrollBottom()
+
+        if (i >= text.length) {
+            clearInterval(timer)
+            el.innerHTML = "<b>AI：</b>" + html
+        }
+    }, speed)
+}
+
+function scrollBottom() {
+    const box = document.getElementById("chatBox")
+    box.scrollTop = box.scrollHeight
+}
+
+async function logout() {
+    await fetch("/api/logout", {
+        method: "POST"
+    })
+
+    location.href = "/"
+}
+
+async function createChat() {
+    const res = await fetch("/api/new_chat", {
+        method: "POST"
+    })
+
+    const data = await res.json()
+
+    currentChatId = data.chat_id
+
+    document.getElementById("chatBox").innerHTML = `
+        <div id="dropOverlay" class="drop-overlay">释放图片以上传识别</div>
+    `
+
+    addMessage("assistant", "已创建新对话，请输入你的问题。")
+
+    setupDrop()
+    loadHistory()
+}
+
+async function deleteChat(chatId, event) {
+    event.stopPropagation()
+
+    if (!confirm("确定删除这条对话记录吗？")) {
+        return
+    }
+
+    const res = await fetch("/api/delete_chat/" + chatId, {
+        method: "DELETE"
+    })
+
+    const data = await res.json()
+
+    if (data.success) {
+        if (currentChatId === chatId) {
+            currentChatId = null
+
+            document.getElementById("chatBox").innerHTML = `
+                <div id="dropOverlay" class="drop-overlay">释放图片以上传识别</div>
+            `
+
+            addMessage("assistant", "对话已删除。你可以新建一个对话。")
+            setupDrop()
+        }
+
+        loadHistory()
+    } else {
+        alert(data.msg || "删除失败")
+    }
+}
+
+async function loadHistory() {
+    const res = await fetch("/api/chat_history")
+    const data = await res.json()
+
+    document.getElementById("chatList").innerHTML = data.map(function(item) {
+        return `
+            <div class="chat-item" onclick="openChat('${item.id}')">
+                <span class="chat-title">${escapeHtml(item.title)}</span>
+                <button class="delete-chat" onclick="deleteChat('${item.id}', event)">🗑</button>
+            </div>
+        `
+    }).join("")
+}
+
+async function openChat(chatId) {
+    currentChatId = chatId
+
+    const res = await fetch("/api/messages/" + chatId)
+    const data = await res.json()
+
+    document.getElementById("chatBox").innerHTML = `
+        <div id="dropOverlay" class="drop-overlay">释放图片以上传识别</div>
+    `
+
+    data.forEach(function(m) {
+        addMessage(m.role === "user" ? "user" : "assistant", m.content)
+    })
+
+    setupDrop()
+}
+
+async function showAnalysis() {
+    const res = await fetch("/api/analysis")
+    const data = await res.json()
+
+    if (!data.success) {
+        alert(data.msg || "分析失败")
+        return
+    }
+
+    const a = data.analysis
+
+    addMessage("assistant", `
+**M3/M4模型分析结果**
+
+- 用户ID：${a.user_id === null ? "未匹配到数字user_id" : a.user_id}
+- 特征来源：${a.feature_note}
+- M3风险概率：${(a.risk_prob * 100).toFixed(2)}%
+- M3风险等级：${a.risk_level}
+- M3状态：${a.risk_note}
+
+**M4资产配置**
+${a.portfolio_str}
+
+M4状态：${a.portfolio_note}
+`)
+}
+
+async function handleImageFile(file) {
+    if (!file) {
+        return
+    }
+
+    if (!file.type.startsWith("image/")) {
+        alert("请上传图片文件")
+        return
+    }
+
+    if (!currentChatId) {
+        await createChat()
+    }
+
+    const prompt = document.getElementById("msg").value.trim() || "请识别这张图片内容，并说明重点。"
+    const localUrl = URL.createObjectURL(file)
+
+    const userDiv = document.createElement("div")
+    userDiv.className = "msg user"
+
+    userDiv.innerHTML = `
+        <b>你：</b>
+        ${renderMarkdown(prompt)}
+        <img class="chat-image" src="${localUrl}">
+    `
+
+    document.getElementById("chatBox").appendChild(userDiv)
+
+    const loadingId = "img" + Date.now()
+    addThinking(loadingId)
+
+    const form = new FormData()
+    form.append("image", file)
+    form.append("prompt", prompt)
+    form.append("chat_id", currentChatId)
+
+    const res = await fetch("/api/image_chat", {
+        method: "POST",
+        body: form
+    })
+
+    const data = await res.json()
+
+    const el = document.getElementById(loadingId)
+    typeWriter(el, renderMarkdown(data.reply || "图片识别无返回"))
+
+    document.getElementById("imageInput").value = ""
+    document.getElementById("msg").value = ""
+
+    loadHistory()
+}
+
+function setupDrop() {
+    const box = document.getElementById("chatBox")
+    const overlay = document.getElementById("dropOverlay")
+
+    if (!box || !overlay) {
+        return
+    }
+
+    ;["dragenter", "dragover"].forEach(function(ev) {
+        box.addEventListener(ev, function(e) {
+            e.preventDefault()
+            overlay.classList.add("active")
+        })
+    })
+
+    ;["dragleave", "drop"].forEach(function(ev) {
+        box.addEventListener(ev, function(e) {
+            e.preventDefault()
+            overlay.classList.remove("active")
+        })
+    })
+
+    box.addEventListener("drop", function(e) {
+        const file = e.dataTransfer.files[0]
+        handleImageFile(file)
+    })
+}
+
+/* 浏览器原生语音识别 */
+function initSpeechRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+
+    if (!SpeechRecognition) {
+        alert("当前浏览器不支持语音识别，请使用 Chrome 或 Edge。")
+        return null
+    }
+
+    const rec = new SpeechRecognition()
+
+    rec.lang = "zh-CN"
+    rec.continuous = true
+    rec.interimResults = true
+
+    rec.onstart = function() {
+        isRecording = true
+
+        document.getElementById("recordBtn").innerText = "⏹ 结束识别"
+        document.getElementById("recordBtn").classList.add("recording")
+        document.getElementById("recordStatus").innerText = "正在听..."
+    }
+
+    rec.onresult = function(event) {
+        let finalText = ""
+        let tempText = ""
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            const text = event.results[i][0].transcript
+
+            if (event.results[i].isFinal) {
+                finalText += text
+            } else {
+                tempText += text
+            }
+        }
+
+        const input = document.getElementById("msg")
+
+        if (finalText) {
+            if (input.value && !input.value.endsWith(" ")) {
+                input.value += " "
+            }
+            input.value += finalText
+        }
+
+        if (tempText) {
+            document.getElementById("recordStatus").innerText = "识别中：" + tempText
+        }
+    }
+
+    rec.onerror = function(event) {
+        console.log("语音识别错误：", event.error)
+        document.getElementById("recordStatus").innerText = "识别失败：" + event.error
+        stopRecording()
+    }
+
+    rec.onend = function() {
+        isRecording = false
+        document.getElementById("recordBtn").innerText = "🎙 开始语音"
+        document.getElementById("recordBtn").classList.remove("recording")
+        document.getElementById("recordStatus").innerText = "识别结束"
+    }
+
+    return rec
+}
+
+function toggleRecording() {
+    if (!isRecording) {
+        recognition = initSpeechRecognition()
+
+        if (recognition) {
+            recognition.start()
+        }
+    } else {
+        stopRecording()
+    }
+}
+
+function stopRecording() {
+    if (recognition) {
+        recognition.stop()
+    }
+
+    isRecording = false
+
+    document.getElementById("recordBtn").innerText = "🎙 开始语音"
+    document.getElementById("recordBtn").classList.remove("recording")
+}
+
+async function sendMsg() {
+    const text = document.getElementById("msg").value.trim()
+
+    if (!text) {
+        return
+    }
+
+    if (!currentChatId) {
+        await createChat()
+    }
+
+    addMessage("user", text)
+
+    document.getElementById("msg").value = ""
+
+    const loadingId = "loading" + Date.now()
+    addThinking(loadingId)
+
+    const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            chat_id: currentChatId,
+            message: text
+        })
+    })
+
+    const data = await res.json()
+
+    const el = document.getElementById(loadingId)
+    typeWriter(el, renderMarkdown(data.reply || "没有返回内容"))
+
+    loadHistory()
+}
+
+document.getElementById("msg").addEventListener("keydown", function(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault()
+        sendMsg()
+    }
+})
+
+setupDrop()
+loadHistory()
+</script>
+</body>
+</html>

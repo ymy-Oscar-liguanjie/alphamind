@@ -67,16 +67,6 @@ def get_all_users():
     c.execute("SELECT DISTINCT user_id FROM chat ORDER BY user_id")
     return [row[0] for row in c.fetchall()]
 
-def get_all_users_with_counts():
-    """获取所有用户及其记录数量"""
-    c.execute("""
-        SELECT user_id, COUNT(*) AS record_count
-        FROM chat
-        GROUP BY user_id
-        ORDER BY user_id
-    """)
-    return c.fetchall()
-
 def delete_user_records(user_id):
     """删除某用户的所有记录"""
     c.execute("DELETE FROM chat WHERE user_id=?", (user_id,))

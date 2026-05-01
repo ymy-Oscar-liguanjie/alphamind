@@ -7,7 +7,7 @@ load_dotenv()
 
 API_KEY = os.getenv("LLM_API_KEY")
 BASE_URL = os.getenv("LLM_BASE_URL", "https://tdyun.ai")
-MODEL = os.getenv("LLM_MODEL", "claude-sonnet-4-6")
+MODEL = os.getenv("LLM_MODEL", "claude-opus-4-6")
 
 # 投顾顾问系统提示词
 ADVISOR_SYSTEM_PROMPT = """你是一位经验丰富的投资顾问。你的职责是：
